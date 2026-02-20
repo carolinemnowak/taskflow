@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -316,7 +317,7 @@
     line-height: 1.5;
   }
 
-  /* Voice button area */
+  /* Input area */
   .voice-area {
     position: fixed;
     bottom: 0;
@@ -324,39 +325,62 @@
     transform: translateX(-50%);
     width: 100%;
     max-width: 480px;
-    padding: 16px 20px 32px;
+    padding: 12px 20px 32px;
     background: linear-gradient(to top, var(--bg) 70%, transparent);
     z-index: 10;
   }
 
-  .voice-btn {
-    width: 100%;
+  .input-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .task-text-input {
+    flex: 1;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    font-family: 'DM Mono', monospace;
+    font-size: 14px;
+    color: var(--text);
+    outline: none;
+    transition: border-color 0.15s;
+    -webkit-appearance: none;
+  }
+
+  .task-text-input:focus {
+    border-color: var(--accent);
+  }
+
+  .task-text-input::placeholder {
+    color: var(--text-subtle);
+  }
+
+  .submit-btn {
+    width: 50px;
+    height: 50px;
     background: var(--accent);
-    color: #0e0e10;
     border: none;
     border-radius: var(--radius);
-    padding: 16px;
-    font-family: 'DM Mono', monospace;
-    font-size: 13px;
-    font-weight: 500;
-    cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 10px;
+    cursor: pointer;
+    flex-shrink: 0;
     transition: all 0.15s;
-    letter-spacing: 0.3px;
+    color: #0e0e10;
   }
 
-  .voice-btn:active { transform: scale(0.98); background: var(--accent-dim); }
-  .voice-btn.listening { background: var(--urgent); color: white; animation: pulse 1.5s infinite; }
+  .submit-btn:active { background: var(--accent-dim); transform: scale(0.96); }
 
-  @keyframes pulse {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(255,107,74,0.4); }
-    50% { box-shadow: 0 0 0 12px rgba(255,107,74,0); }
+  .input-hint {
+    text-align: center;
+    margin-top: 6px;
+    font-size: 11px;
+    color: var(--text-subtle);
   }
-
-  .voice-btn svg { width: 18px; height: 18px; flex-shrink: 0; }
 
   /* API key setup */
   .setup-banner {
@@ -670,17 +694,18 @@
   <div id="taskList"></div>
 </div>
 
-<!-- Voice button -->
+<!-- Input area -->
 <div class="voice-area">
-  <button class="voice-btn" id="voiceBtn" onclick="toggleVoice()">
-    <svg id="micIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-      <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
-      <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-      <line x1="12" y1="19" x2="12" y2="23"/>
-      <line x1="8" y1="23" x2="16" y2="23"/>
-    </svg>
-    <span id="voiceBtnText">Speak a task</span>
-  </button>
+  <div class="input-row">
+    <input type="text" id="taskTextInput" class="task-text-input" placeholder="Type or use 🎤 on keyboard…" autocomplete="off" autocorrect="off" spellcheck="false" onkeydown="if(event.key==='Enter')submitTextTask()">
+    <button class="submit-btn" onclick="submitTextTask()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="18" height="18">
+        <line x1="22" y1="2" x2="11" y2="13"/>
+        <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+      </svg>
+    </button>
+  </div>
+  <div class="input-hint">Tap the field → tap 🎤 on your keyboard to dictate</div>
 </div>
 
 <!-- Confirmation Modal -->
@@ -724,8 +749,6 @@
 let tasks = JSON.parse(localStorage.getItem('taskflow_tasks') || '[]');
 let currentFilter = 'all';
 let selectedPriority = 'medium';
-let recognition = null;
-let isListening = false;
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
 function init() {
@@ -872,51 +895,14 @@ function saveTasks() {
   localStorage.setItem('taskflow_tasks', JSON.stringify(tasks));
 }
 
-// ─── Voice ────────────────────────────────────────────────────────────────────
-function toggleVoice() {
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SpeechRecognition) {
-    const text = prompt('Speech recognition not supported in this browser. Type your task:');
-    if (text && text.trim()) parseTask(text.trim());
-    return;
-  }
-
-  if (isListening) {
-    recognition && recognition.stop();
-    return;
-  }
-
-  recognition = new SpeechRecognition();
-  recognition.continuous = false;
-  recognition.interimResults = false;
-  recognition.lang = 'en-US';
-
-  recognition.onstart = () => {
-    isListening = true;
-    const btn = document.getElementById('voiceBtn');
-    const txt = document.getElementById('voiceBtnText');
-    btn.classList.add('listening');
-    txt.innerHTML = `<div class="listening-indicator"><span></span><span></span><span></span><span></span><span></span></div>`;
-  };
-
-  recognition.onresult = (e) => {
-    const transcript = e.results[0][0].transcript;
-    parseTask(transcript);
-  };
-
-  recognition.onerror = (e) => {
-    showToast('Mic error: ' + e.error);
-  };
-
-  recognition.onend = () => {
-    isListening = false;
-    const btn = document.getElementById('voiceBtn');
-    const txt = document.getElementById('voiceBtnText');
-    btn.classList.remove('listening');
-    txt.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>Speak a task`;
-  };
-
-  recognition.start();
+// ─── Submit task from text input ──────────────────────────────────────────────
+function submitTextTask() {
+  const input = document.getElementById('taskTextInput');
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+  input.blur();
+  parseTask(text);
 }
 
 // ─── Local NLP Parser (no API, runs in browser) ───────────────────────────────
@@ -1056,20 +1042,13 @@ function endOfMonth(d) {
   return new Date(d.getFullYear(), d.getMonth() + 1, 0);
 }
 
-// ─── Voice / Parse dispatch ────────────────────────────────────────────────────
+// ─── Parse dispatch ───────────────────────────────────────────────────────────
 function parseTask(transcript) {
-  const btn = document.getElementById('voiceBtn');
-  const txt = document.getElementById('voiceBtnText');
-  btn.disabled = true;
-  txt.innerHTML = `<div class="loading-dots"><span></span><span></span><span></span></div> Parsing...`;
   try {
     const parsed = parseTaskLocally(transcript);
     openConfirmModal(transcript, parsed.name, parsed.dueDate, parsed.priority);
   } catch(err) {
     openConfirmModal(transcript, transcript, null, 'medium');
-  } finally {
-    btn.disabled = false;
-    txt.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>Speak a task`;
   }
 }
 
