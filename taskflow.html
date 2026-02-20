@@ -1,0 +1,1132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>TaskFlow — Voice Task Manager</title>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0e0e10;
+    --surface: #18181c;
+    --surface2: #222228;
+    --border: #2e2e38;
+    --accent: #c8f060;
+    --accent-dim: #a8cf40;
+    --text: #f0f0ec;
+    --text-muted: #7a7a88;
+    --text-subtle: #4a4a58;
+    --urgent: #ff6b4a;
+    --high: #ffb347;
+    --medium: #c8f060;
+    --low: #5a9fd4;
+    --done: #3a3a48;
+    --radius: 14px;
+    --radius-sm: 8px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Mono', monospace;
+    font-size: 13px;
+    min-height: 100vh;
+    max-width: 480px;
+    margin: 0 auto;
+    padding: 0 0 120px 0;
+    position: relative;
+  }
+
+  /* Noise texture overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0.5;
+  }
+
+  /* Header */
+  .header {
+    padding: 28px 20px 0;
+    position: relative;
+    z-index: 1;
+  }
+
+  .header-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 6px;
+  }
+
+  .logo {
+    font-family: 'Instrument Serif', serif;
+    font-size: 28px;
+    line-height: 1;
+    color: var(--text);
+    letter-spacing: -0.5px;
+  }
+
+  .logo span {
+    color: var(--accent);
+  }
+
+  .date-chip {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 5px 12px;
+    font-size: 11px;
+    color: var(--text-muted);
+    letter-spacing: 0.5px;
+  }
+
+  .stats-row {
+    display: flex;
+    gap: 8px;
+    margin-top: 16px;
+  }
+
+  .stat {
+    flex: 1;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 10px 12px;
+  }
+
+  .stat-num {
+    font-family: 'Instrument Serif', serif;
+    font-size: 22px;
+    line-height: 1;
+    color: var(--accent);
+  }
+
+  .stat-label {
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-top: 2px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+  }
+
+  /* Filter tabs */
+  .filter-row {
+    display: flex;
+    gap: 6px;
+    padding: 16px 20px 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+    position: relative;
+    z-index: 1;
+  }
+
+  .filter-row::-webkit-scrollbar { display: none; }
+
+  .filter-btn {
+    flex-shrink: 0;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 6px 14px;
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.15s;
+    letter-spacing: 0.3px;
+  }
+
+  .filter-btn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #0e0e10;
+    font-weight: 500;
+  }
+
+  /* Task list */
+  .tasks-section {
+    padding: 16px 20px 0;
+    position: relative;
+    z-index: 1;
+  }
+
+  .section-label {
+    font-size: 10px;
+    color: var(--text-subtle);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+    padding-left: 2px;
+  }
+
+  .task-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    transition: all 0.15s;
+    position: relative;
+    overflow: hidden;
+    animation: slideIn 0.25s ease;
+  }
+
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .task-card::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    border-radius: 3px 0 0 3px;
+  }
+
+  .task-card.urgent::before { background: var(--urgent); }
+  .task-card.high::before { background: var(--high); }
+  .task-card.medium::before { background: var(--medium); }
+  .task-card.low::before { background: var(--low); }
+  .task-card.done { opacity: 0.45; }
+  .task-card.done::before { background: var(--done); }
+
+  .task-card:active { transform: scale(0.98); }
+
+  .task-top {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .task-check {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 1.5px solid var(--border);
+    flex-shrink: 0;
+    margin-top: 1px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+  }
+
+  .task-card.urgent .task-check { border-color: var(--urgent); }
+  .task-card.high .task-check { border-color: var(--high); }
+  .task-card.medium .task-check { border-color: var(--medium); }
+  .task-card.low .task-check { border-color: var(--low); }
+  .task-card.done .task-check { background: var(--done); border-color: var(--done); }
+
+  .task-check svg { width: 10px; height: 10px; opacity: 0; transition: opacity 0.15s; }
+  .task-card.done .task-check svg { opacity: 1; }
+
+  .task-name {
+    flex: 1;
+    font-size: 13px;
+    line-height: 1.4;
+    color: var(--text);
+  }
+
+  .task-card.done .task-name {
+    text-decoration: line-through;
+    color: var(--text-muted);
+  }
+
+  .task-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+    padding-left: 28px;
+  }
+
+  .task-due {
+    font-size: 11px;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .task-due.overdue { color: var(--urgent); }
+  .task-due.today { color: var(--high); }
+
+  .priority-tag {
+    font-size: 10px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 500;
+  }
+
+  .priority-tag.urgent { background: rgba(255,107,74,0.15); color: var(--urgent); }
+  .priority-tag.high { background: rgba(255,179,71,0.15); color: var(--high); }
+  .priority-tag.medium { background: rgba(200,240,96,0.15); color: var(--medium); }
+  .priority-tag.low { background: rgba(90,159,212,0.15); color: var(--low); }
+
+  .task-delete {
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-subtle);
+    cursor: pointer;
+    border-radius: 6px;
+    transition: all 0.15s;
+    flex-shrink: 0;
+  }
+
+  .task-delete:active { background: rgba(255,107,74,0.15); color: var(--urgent); }
+
+  .empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--text-subtle);
+  }
+
+  .empty-icon {
+    font-size: 36px;
+    margin-bottom: 12px;
+    opacity: 0.5;
+  }
+
+  .empty-text {
+    font-family: 'Instrument Serif', serif;
+    font-size: 18px;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+  }
+
+  .empty-sub {
+    font-size: 12px;
+    color: var(--text-subtle);
+    line-height: 1.5;
+  }
+
+  /* Voice button area */
+  .voice-area {
+    position: fixed;
+    bottom: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 100%;
+    max-width: 480px;
+    padding: 16px 20px 32px;
+    background: linear-gradient(to top, var(--bg) 70%, transparent);
+    z-index: 10;
+  }
+
+  .voice-btn {
+    width: 100%;
+    background: var(--accent);
+    color: #0e0e10;
+    border: none;
+    border-radius: var(--radius);
+    padding: 16px;
+    font-family: 'DM Mono', monospace;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    transition: all 0.15s;
+    letter-spacing: 0.3px;
+  }
+
+  .voice-btn:active { transform: scale(0.98); background: var(--accent-dim); }
+  .voice-btn.listening { background: var(--urgent); color: white; animation: pulse 1.5s infinite; }
+
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255,107,74,0.4); }
+    50% { box-shadow: 0 0 0 12px rgba(255,107,74,0); }
+  }
+
+  .voice-btn svg { width: 18px; height: 18px; flex-shrink: 0; }
+
+  /* API key setup */
+  .setup-banner {
+    margin: 16px 20px 0;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    position: relative;
+    z-index: 1;
+  }
+
+  .setup-title {
+    font-size: 12px;
+    color: var(--accent);
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .setup-input {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 9px 12px;
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+    color: var(--text);
+    outline: none;
+    transition: border-color 0.15s;
+  }
+
+  .setup-input:focus { border-color: var(--accent); }
+  .setup-input::placeholder { color: var(--text-subtle); }
+
+  .setup-save {
+    margin-top: 8px;
+    background: var(--accent);
+    color: #0e0e10;
+    border: none;
+    border-radius: var(--radius-sm);
+    padding: 8px 16px;
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .setup-save:active { background: var(--accent-dim); }
+
+  /* Modal overlay */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(14,14,16,0.85);
+    backdrop-filter: blur(8px);
+    z-index: 100;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s;
+  }
+
+  .modal-overlay.open {
+    opacity: 1;
+    pointer-events: all;
+  }
+
+  .modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius) var(--radius) 0 0;
+    padding: 24px 20px 40px;
+    width: 100%;
+    max-width: 480px;
+    transform: translateY(40px);
+    transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  .modal-overlay.open .modal {
+    transform: translateY(0);
+  }
+
+  .modal-handle {
+    width: 36px;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    margin: 0 auto 20px;
+  }
+
+  .modal-title {
+    font-family: 'Instrument Serif', serif;
+    font-size: 20px;
+    margin-bottom: 4px;
+  }
+
+  .modal-sub {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-bottom: 20px;
+    line-height: 1.5;
+  }
+
+  .modal-sub.transcript {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 10px 12px;
+    font-style: italic;
+    color: var(--text-muted);
+    margin-bottom: 20px;
+  }
+
+  .form-group {
+    margin-bottom: 14px;
+  }
+
+  .form-label {
+    font-size: 10px;
+    color: var(--text-muted);
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+    display: block;
+  }
+
+  .form-input {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 10px 12px;
+    font-family: 'DM Mono', monospace;
+    font-size: 13px;
+    color: var(--text);
+    outline: none;
+    transition: border-color 0.15s;
+  }
+
+  .form-input:focus { border-color: var(--accent); }
+
+  .priority-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+  }
+
+  .priority-option {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 8px 4px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.15s;
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.3px;
+    color: var(--text-muted);
+  }
+
+  .priority-option.selected.urgent { border-color: var(--urgent); color: var(--urgent); background: rgba(255,107,74,0.1); }
+  .priority-option.selected.high { border-color: var(--high); color: var(--high); background: rgba(255,179,71,0.1); }
+  .priority-option.selected.medium { border-color: var(--medium); color: var(--medium); background: rgba(200,240,96,0.1); }
+  .priority-option.selected.low { border-color: var(--low); color: var(--low); background: rgba(90,159,212,0.1); }
+
+  .modal-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 20px;
+  }
+
+  .btn-cancel {
+    flex: 1;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 12px;
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .btn-add {
+    flex: 2;
+    background: var(--accent);
+    border: none;
+    border-radius: var(--radius-sm);
+    padding: 12px;
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+    font-weight: 500;
+    color: #0e0e10;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .btn-add:active { background: var(--accent-dim); }
+  .btn-cancel:active { background: var(--surface2); }
+
+  /* Loading state */
+  .loading-dots {
+    display: inline-flex;
+    gap: 4px;
+    align-items: center;
+  }
+
+  .loading-dots span {
+    width: 5px;
+    height: 5px;
+    background: currentColor;
+    border-radius: 50%;
+    animation: dot 1.2s infinite;
+  }
+
+  .loading-dots span:nth-child(2) { animation-delay: 0.2s; }
+  .loading-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+  @keyframes dot {
+    0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+    40% { transform: scale(1); opacity: 1; }
+  }
+
+  .listening-indicator {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    height: 20px;
+  }
+
+  .listening-indicator span {
+    width: 3px;
+    background: white;
+    border-radius: 2px;
+    animation: wave 1s infinite ease-in-out;
+  }
+
+  .listening-indicator span:nth-child(1) { height: 8px; animation-delay: 0s; }
+  .listening-indicator span:nth-child(2) { height: 14px; animation-delay: 0.1s; }
+  .listening-indicator span:nth-child(3) { height: 18px; animation-delay: 0.2s; }
+  .listening-indicator span:nth-child(4) { height: 14px; animation-delay: 0.3s; }
+  .listening-indicator span:nth-child(5) { height: 8px; animation-delay: 0.4s; }
+
+  @keyframes wave {
+    0%, 100% { transform: scaleY(0.5); }
+    50% { transform: scaleY(1); }
+  }
+
+  .toast {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%) translateY(-80px);
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 10px 16px;
+    font-size: 12px;
+    color: var(--text-muted);
+    z-index: 200;
+    transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    white-space: nowrap;
+  }
+
+  .toast.show { transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-top">
+    <div class="logo">Task<span>flow</span></div>
+    <div class="date-chip" id="dateChip"></div>
+  </div>
+  <div class="stats-row">
+    <div class="stat">
+      <div class="stat-num" id="statTotal">0</div>
+      <div class="stat-label">Total</div>
+    </div>
+    <div class="stat">
+      <div class="stat-num" id="statToday">0</div>
+      <div class="stat-label">Due Today</div>
+    </div>
+    <div class="stat">
+      <div class="stat-num" id="statDone">0</div>
+      <div class="stat-label">Done</div>
+    </div>
+  </div>
+</div>
+
+<div class="filter-row">
+  <button class="filter-btn active" onclick="setFilter('all', this)">All</button>
+  <button class="filter-btn" onclick="setFilter('urgent', this)">🔴 Urgent</button>
+  <button class="filter-btn" onclick="setFilter('high', this)">🟡 High</button>
+  <button class="filter-btn" onclick="setFilter('medium', this)">🟢 Medium</button>
+  <button class="filter-btn" onclick="setFilter('low', this)">🔵 Low</button>
+  <button class="filter-btn" onclick="setFilter('done', this)">✓ Done</button>
+</div>
+
+<div class="tasks-section">
+  <div class="section-label" id="sectionLabel">All tasks</div>
+  <div id="taskList"></div>
+</div>
+
+<!-- Voice button -->
+<div class="voice-area">
+  <button class="voice-btn" id="voiceBtn" onclick="toggleVoice()">
+    <svg id="micIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+      <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+      <line x1="12" y1="19" x2="12" y2="23"/>
+      <line x1="8" y1="23" x2="16" y2="23"/>
+    </svg>
+    <span id="voiceBtnText">Speak a task</span>
+  </button>
+</div>
+
+<!-- Confirmation Modal -->
+<div class="modal-overlay" id="confirmModal">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">Confirm task</div>
+    <div class="modal-sub" id="transcriptDisplay"></div>
+
+    <div class="form-group">
+      <label class="form-label">Task</label>
+      <input type="text" class="form-input" id="taskNameInput" placeholder="Task description">
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Due date</label>
+      <input type="date" class="form-input" id="taskDateInput">
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Priority</label>
+      <div class="priority-grid">
+        <div class="priority-option urgent" data-priority="urgent" onclick="selectPriority('urgent')">Urgent</div>
+        <div class="priority-option high" data-priority="high" onclick="selectPriority('high')">High</div>
+        <div class="priority-option medium" data-priority="medium" onclick="selectPriority('medium')">Medium</div>
+        <div class="priority-option low" data-priority="low" onclick="selectPriority('low')">Low</div>
+      </div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModal()">Cancel</button>
+      <button class="btn-add" onclick="addTaskFromModal()">Add task</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ─── State ───────────────────────────────────────────────────────────────────
+let tasks = JSON.parse(localStorage.getItem('taskflow_tasks') || '[]');
+let currentFilter = 'all';
+let selectedPriority = 'medium';
+let recognition = null;
+let isListening = false;
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+function init() {
+  updateDateChip();
+  renderTasks();
+}
+
+function updateDateChip() {
+  const now = new Date();
+  const opts = { weekday: 'short', month: 'short', day: 'numeric' };
+  document.getElementById('dateChip').textContent = now.toLocaleDateString('en-US', opts).toUpperCase();
+}
+
+// ─── API Key (unused, kept for compat) ───────────────────────────────────────
+function saveApiKey() {}
+
+// ─── Filter ───────────────────────────────────────────────────────────────────
+function setFilter(filter, btn) {
+  currentFilter = filter;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  const labels = { all: 'All tasks', urgent: 'Urgent tasks', high: 'High priority', medium: 'Medium priority', low: 'Low priority', done: 'Completed' };
+  document.getElementById('sectionLabel').textContent = labels[filter];
+  renderTasks();
+}
+
+// ─── Render ───────────────────────────────────────────────────────────────────
+function renderTasks() {
+  const list = document.getElementById('taskList');
+  const today = new Date(); today.setHours(0,0,0,0);
+
+  let filtered = tasks.filter(t => {
+    if (currentFilter === 'all') return !t.done;
+    if (currentFilter === 'done') return t.done;
+    return t.priority === currentFilter && !t.done;
+  });
+
+  // Sort: overdue first, then by date, then no-date by priority
+  const priorityOrder = { urgent: 0, high: 1, medium: 2, low: 3 };
+  filtered.sort((a, b) => {
+    if (a.done !== b.done) return a.done ? 1 : -1;
+    const ad = a.dueDate ? new Date(a.dueDate) : null;
+    const bd = b.dueDate ? new Date(b.dueDate) : null;
+    if (ad && bd) return ad - bd;
+    if (ad) return -1;
+    if (bd) return 1;
+    return priorityOrder[a.priority] - priorityOrder[b.priority];
+  });
+
+  // Stats
+  const active = tasks.filter(t => !t.done);
+  const done = tasks.filter(t => t.done);
+  const todayTasks = active.filter(t => {
+    if (!t.dueDate) return false;
+    const d = new Date(t.dueDate + 'T00:00:00'); d.setHours(0,0,0,0);
+    return d.getTime() === today.getTime();
+  });
+  document.getElementById('statTotal').textContent = active.length;
+  document.getElementById('statToday').textContent = todayTasks.length;
+  document.getElementById('statDone').textContent = done.length;
+
+  if (filtered.length === 0) {
+    const msgs = {
+      all: ['Nothing on your plate', 'Tap the button below and speak a task to get started.'],
+      done: ['No completed tasks yet', 'Keep going — check off tasks as you finish them.'],
+      urgent: ['No urgent tasks', 'Your urgent queue is clear.'],
+      high: ['No high priority tasks', ''],
+      medium: ['No medium priority tasks', ''],
+      low: ['No low priority tasks', '']
+    };
+    const [title, sub] = msgs[currentFilter] || ['No tasks', ''];
+    list.innerHTML = `<div class="empty-state">
+      <div class="empty-icon">✦</div>
+      <div class="empty-text">${title}</div>
+      <div class="empty-sub">${sub}</div>
+    </div>`;
+    return;
+  }
+
+  list.innerHTML = filtered.map(task => {
+    const dueStr = formatDue(task.dueDate, today);
+    const dueClass = dueStr.overdue ? 'overdue' : dueStr.today ? 'today' : '';
+    return `
+    <div class="task-card ${task.done ? 'done' : task.priority}" onclick="toggleDone('${task.id}')">
+      <div class="task-top">
+        <div class="task-check">
+          <svg viewBox="0 0 10 10" fill="none" stroke="${task.done ? '#f0f0ec' : 'currentColor'}" stroke-width="2">
+            <polyline points="1.5,5 4,7.5 8.5,2.5"/>
+          </svg>
+        </div>
+        <div class="task-name">${escHtml(task.name)}</div>
+        <div class="task-delete" onclick="deleteTask(event,'${task.id}')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </div>
+      </div>
+      <div class="task-meta">
+        ${dueStr.text ? `<div class="task-due ${dueClass}">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+          </svg>
+          ${dueStr.text}
+        </div>` : ''}
+        ${!task.done ? `<div class="priority-tag ${task.priority}">${task.priority}</div>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function formatDue(dateStr, today) {
+  if (!dateStr) return { text: '', overdue: false, today: false };
+  const d = new Date(dateStr + 'T00:00:00'); d.setHours(0,0,0,0);
+  const diff = Math.round((d - today) / 86400000);
+  if (diff < 0) return { text: `${Math.abs(diff)}d overdue`, overdue: true, today: false };
+  if (diff === 0) return { text: 'Today', overdue: false, today: true };
+  if (diff === 1) return { text: 'Tomorrow', overdue: false, today: false };
+  if (diff < 7) return { text: `${diff} days`, overdue: false, today: false };
+  return { text: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }), overdue: false, today: false };
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ─── Task actions ─────────────────────────────────────────────────────────────
+function toggleDone(id) {
+  const t = tasks.find(t => t.id === id);
+  if (!t) return;
+  t.done = !t.done;
+  saveTasks();
+  renderTasks();
+}
+
+function deleteTask(e, id) {
+  e.stopPropagation();
+  tasks = tasks.filter(t => t.id !== id);
+  saveTasks();
+  renderTasks();
+  showToast('Task deleted');
+}
+
+function saveTasks() {
+  localStorage.setItem('taskflow_tasks', JSON.stringify(tasks));
+}
+
+// ─── Voice ────────────────────────────────────────────────────────────────────
+function toggleVoice() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    const text = prompt('Speech recognition not supported in this browser. Type your task:');
+    if (text && text.trim()) parseTask(text.trim());
+    return;
+  }
+
+  if (isListening) {
+    recognition && recognition.stop();
+    return;
+  }
+
+  recognition = new SpeechRecognition();
+  recognition.continuous = false;
+  recognition.interimResults = false;
+  recognition.lang = 'en-US';
+
+  recognition.onstart = () => {
+    isListening = true;
+    const btn = document.getElementById('voiceBtn');
+    const txt = document.getElementById('voiceBtnText');
+    btn.classList.add('listening');
+    txt.innerHTML = `<div class="listening-indicator"><span></span><span></span><span></span><span></span><span></span></div>`;
+  };
+
+  recognition.onresult = (e) => {
+    const transcript = e.results[0][0].transcript;
+    parseTask(transcript);
+  };
+
+  recognition.onerror = (e) => {
+    showToast('Mic error: ' + e.error);
+  };
+
+  recognition.onend = () => {
+    isListening = false;
+    const btn = document.getElementById('voiceBtn');
+    const txt = document.getElementById('voiceBtnText');
+    btn.classList.remove('listening');
+    txt.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>Speak a task`;
+  };
+
+  recognition.start();
+}
+
+// ─── Local NLP Parser (no API, runs in browser) ───────────────────────────────
+function parseTaskLocally(transcript) {
+  const lower = transcript.toLowerCase();
+  const today = new Date(); today.setHours(0,0,0,0);
+
+  // ── Date extraction ──
+  let dueDate = null;
+
+  const datePatterns = [
+    // Explicit: "on Monday", "on the 15th", "on March 5"
+    { re: /\bon\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/, fn: m => nextWeekday(m[1]) },
+    { re: /\bon\s+(?:the\s+)?(\d{1,2})(?:st|nd|rd|th)?\b/, fn: m => dateThisMonth(parseInt(m[1])) },
+    { re: /\bon\s+(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(\d{1,2})\b/, fn: m => dateFromMonthDay(m[1], parseInt(m[2])) },
+    // Relative: "tomorrow", "today", "next week", "in X days/weeks"
+    { re: /\btoday\b/, fn: () => addDays(today, 0) },
+    { re: /\btomorrow\b/, fn: () => addDays(today, 1) },
+    { re: /\bday after tomorrow\b/, fn: () => addDays(today, 2) },
+    { re: /\bnext week\b/, fn: () => addDays(today, 7) },
+    { re: /\bin (\d+) days?\b/, fn: m => addDays(today, parseInt(m[1])) },
+    { re: /\bin (\d+) weeks?\b/, fn: m => addDays(today, parseInt(m[1]) * 7) },
+    { re: /\ba week from (?:now|today)\b/, fn: () => addDays(today, 7) },
+    // End of period
+    { re: /\bend of (?:the )?week\b/, fn: () => nextWeekday('friday') },
+    { re: /\bend of (?:the )?month\b/, fn: () => endOfMonth(today) },
+    // This weekday: "this friday"
+    { re: /\bthis\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/, fn: m => thisWeekday(m[1]) },
+    // Next weekday: "next friday"
+    { re: /\bnext\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/, fn: m => nextWeekday(m[1], true) },
+    // Just weekday name: "friday", "monday"
+    { re: /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/, fn: m => nextWeekday(m[1]) },
+  ];
+
+  for (const { re, fn } of datePatterns) {
+    const m = lower.match(re);
+    if (m) { dueDate = fn(m); break; }
+  }
+
+  // ── Priority extraction ──
+  let priority = 'medium';
+
+  const urgentWords = /\b(asap|urgent|urgently|immediately|critical|emergency|right away|right now|deadline today|due today|today)\b/;
+  const highWords = /\b(important|high priority|soon|this week|by friday|by end of week|don't forget|must|need to)\b/;
+  const lowWords = /\b(whenever|someday|eventually|no rush|low priority|if i get to it|at some point|later|when i can)\b/;
+
+  if (urgentWords.test(lower) || (dueDate && isSameDay(dueDate, today)) || (dueDate && isSameDay(dueDate, addDays(today, 1)))) {
+    priority = 'urgent';
+  } else if (highWords.test(lower) || (dueDate && daysBetween(today, dueDate) <= 7)) {
+    priority = 'high';
+  } else if (lowWords.test(lower)) {
+    priority = 'low';
+  }
+
+  // ── Task name cleanup ──
+  // Remove date/time phrases from task name
+  let name = transcript;
+  const removePatterns = [
+    /\b(by|before|on|due|until|for)\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/gi,
+    /\b(by|before|on|due|until|for)\s+(next|this)\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/gi,
+    /\b(by|before|on|due|until)\s+(tomorrow|today|end of (?:the )?week|end of (?:the )?month)\b/gi,
+    /\bin \d+ (days?|weeks?)\b/gi,
+    /\b(next week|this week|by friday|end of week|end of month|day after tomorrow)\b/gi,
+    /\b(asap|urgently|right away|right now)\b/gi,
+    /\btoday\b/gi, /\btomorrow\b/gi,
+    /\bi need to\b/gi, /\bi have to\b/gi, /\bi should\b/gi, /\bremind me to\b/gi,
+    /\bdon't forget to\b/gi, /\bmake sure to\b/gi, /\bplease\b/gi,
+    /\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|th)?\b/gi,
+  ];
+  for (const re of removePatterns) name = name.replace(re, '');
+
+  // Trim filler words, extra spaces, punctuation
+  name = name.replace(/\s+/g, ' ').replace(/^[\s,.-]+|[\s,.-]+$/g, '').trim();
+
+  // Capitalize first letter
+  if (name) name = name.charAt(0).toUpperCase() + name.slice(1);
+  if (!name) name = transcript; // fallback to full transcript
+
+  return { name, dueDate: dueDate ? fmtDate(dueDate) : null, priority };
+}
+
+// ── Date helpers ──────────────────────────────────────────────────────────────
+function addDays(d, n) {
+  const r = new Date(d); r.setDate(r.getDate() + n); return r;
+}
+
+function fmtDate(d) {
+  return d.toISOString().split('T')[0];
+}
+
+function isSameDay(a, b) {
+  return a.toDateString() === b.toDateString();
+}
+
+function daysBetween(a, b) {
+  return Math.round((b - a) / 86400000);
+}
+
+const WEEKDAYS = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
+
+function nextWeekday(name, forceNext = false) {
+  const today = new Date(); today.setHours(0,0,0,0);
+  const target = WEEKDAYS.indexOf(name.toLowerCase());
+  if (target === -1) return null;
+  let diff = target - today.getDay();
+  if (diff <= 0 || forceNext) diff += 7;
+  return addDays(today, diff);
+}
+
+function thisWeekday(name) {
+  const today = new Date(); today.setHours(0,0,0,0);
+  const target = WEEKDAYS.indexOf(name.toLowerCase());
+  let diff = target - today.getDay();
+  if (diff <= 0) diff += 7;
+  return addDays(today, diff);
+}
+
+function dateThisMonth(day) {
+  const today = new Date(); today.setHours(0,0,0,0);
+  const d = new Date(today.getFullYear(), today.getMonth(), day);
+  if (d < today) d.setMonth(d.getMonth() + 1);
+  return d;
+}
+
+function dateFromMonthDay(monthStr, day) {
+  const months = { jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11,
+    january:0,february:1,march:2,april:3,june:5,july:6,august:7,september:8,october:9,november:10,december:11 };
+  const today = new Date(); today.setHours(0,0,0,0);
+  const m = months[monthStr.slice(0,3).toLowerCase()];
+  if (m === undefined) return null;
+  let d = new Date(today.getFullYear(), m, day);
+  if (d < today) d.setFullYear(d.getFullYear() + 1);
+  return d;
+}
+
+function endOfMonth(d) {
+  return new Date(d.getFullYear(), d.getMonth() + 1, 0);
+}
+
+// ─── Voice / Parse dispatch ────────────────────────────────────────────────────
+function parseTask(transcript) {
+  const btn = document.getElementById('voiceBtn');
+  const txt = document.getElementById('voiceBtnText');
+  btn.disabled = true;
+  txt.innerHTML = `<div class="loading-dots"><span></span><span></span><span></span></div> Parsing...`;
+  try {
+    const parsed = parseTaskLocally(transcript);
+    openConfirmModal(transcript, parsed.name, parsed.dueDate, parsed.priority);
+  } catch(err) {
+    openConfirmModal(transcript, transcript, null, 'medium');
+  } finally {
+    btn.disabled = false;
+    txt.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>Speak a task`;
+  }
+}
+
+// ─── Confirm Modal ────────────────────────────────────────────────────────────
+function openConfirmModal(transcript, name, dueDate, priority) {
+  document.getElementById('transcriptDisplay').textContent = `"${transcript}"`;
+  document.getElementById('taskNameInput').value = name || '';
+  document.getElementById('taskDateInput').value = dueDate || '';
+  selectPriority(priority || 'medium');
+  document.getElementById('confirmModal').classList.add('open');
+}
+
+function closeModal() {
+  document.getElementById('confirmModal').classList.remove('open');
+}
+
+function selectPriority(p) {
+  selectedPriority = p;
+  document.querySelectorAll('.priority-option').forEach(el => {
+    el.classList.toggle('selected', el.dataset.priority === p);
+  });
+}
+
+function addTaskFromModal() {
+  const name = document.getElementById('taskNameInput').value.trim();
+  if (!name) { showToast('Please enter a task name'); return; }
+  const dueDate = document.getElementById('taskDateInput').value || null;
+  tasks.push({
+    id: Date.now().toString(36) + Math.random().toString(36).slice(2),
+    name,
+    dueDate,
+    priority: selectedPriority,
+    done: false,
+    createdAt: new Date().toISOString()
+  });
+  saveTasks();
+  closeModal();
+  if (currentFilter !== 'done') setFilter('all', document.querySelector('.filter-btn'));
+  renderTasks();
+  showToast('Task added ✓');
+}
+
+// ─── Toast ────────────────────────────────────────────────────────────────────
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2500);
+}
+
+// ─── Close modal on backdrop click ───────────────────────────────────────────
+document.getElementById('confirmModal').addEventListener('click', function(e) {
+  if (e.target === this) closeModal();
+});
+
+// ─── Start ────────────────────────────────────────────────────────────────────
+init();
+</script>
+</body>
+</html>
