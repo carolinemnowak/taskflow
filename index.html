@@ -295,14 +295,9 @@
     <div class="notif-row">
       <div>
         <div class="notif-label">Morning digest</div>
-        <div class="notif-sub">Daily summary of today's tasks</div>
+        <div class="notif-sub">Daily summary at 7:00 AM ET every morning</div>
       </div>
       <div class="toggle" id="digestToggle" onclick="toggleDigest()"></div>
-    </div>
-
-    <div id="digestTimeRow" style="display:none;margin-bottom:16px;">
-      <div class="form-label">Reminder time</div>
-      <input type="time" class="time-input" id="digestTime" value="08:00" onchange="saveNotifSettings()">
     </div>
 
     <div class="panel-divider"></div>
@@ -310,9 +305,19 @@
     <div class="notif-row">
       <div>
         <div class="notif-label">Overdue alerts</div>
-        <div class="notif-sub">Notify when tasks become overdue</div>
+        <div class="notif-sub">Alerts at the exact moment a task becomes overdue</div>
       </div>
       <div class="toggle" id="overdueToggle" onclick="toggleOverdue()"></div>
+    </div>
+
+    <div class="panel-divider"></div>
+
+    <div class="notif-row">
+      <div>
+        <div class="notif-label">Reminders</div>
+        <div class="notif-sub">Alert 30 minutes before tasks with a set time</div>
+      </div>
+      <div class="toggle" id="reminderToggle" onclick="toggleReminder()"></div>
     </div>
 
     <div id="notifStatus" class="notif-status" style="display:none"></div>
@@ -330,8 +335,11 @@
       <input type="text" class="form-input" id="taskNameInput" placeholder="Task description">
     </div>
     <div class="form-group">
-      <label class="form-label">Due date</label>
-      <input type="date" class="form-input" id="taskDateInput">
+      <label class="form-label">Due date & time</label>
+      <div style="display:flex;gap:8px;">
+        <input type="date" class="form-input" id="taskDateInput" style="flex:2">
+        <input type="time" class="form-input" id="taskTimeInput" style="flex:1" placeholder="--:--">
+      </div>
     </div>
     <div class="form-group">
       <label class="form-label">Priority</label>
@@ -359,7 +367,7 @@ let selectedPriority = 'medium';
 let sortBy = localStorage.getItem('tf_sort') || 'dueDate';
 let sortOrder = localStorage.getItem('tf_order') || 'asc';
 let groupBy = localStorage.getItem('tf_group') || 'none';
-let notifSettings = JSON.parse(localStorage.getItem('tf_notif') || '{"digest":false,"overdue":false,"digestTime":"08:00"}');
+let notifSettings = JSON.parse(localStorage.getItem('tf_notif') || '{"digest":false,"overdue":false,"reminder":false}');
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
 function init() {
@@ -539,7 +547,7 @@ function renderTasks() {
 }
 
 function taskCardHTML(task, today) {
-  const dueStr = formatDue(task.dueDate, today);
+  const dueStr = formatDue(task.dueDate, today, task.dueTime);
   const dueClass = dueStr.overdue ? 'overdue' : dueStr.today ? 'today' : '';
   return `
   <div class="task-card ${task.done ? 'done' : task.priority}" onclick="toggleDone('${task.id}')">
@@ -568,15 +576,24 @@ function taskCardHTML(task, today) {
   </div>`;
 }
 
-function formatDue(dateStr, today) {
+function formatDue(dateStr, today, timeStr) {
   if (!dateStr) return { text: '', overdue: false, today: false };
   const d = new Date(dateStr + 'T00:00:00'); d.setHours(0,0,0,0);
   const diff = Math.round((d - today) / 86400000);
-  if (diff < 0) return { text: `${Math.abs(diff)}d overdue`, overdue: true, today: false };
-  if (diff === 0) return { text: 'Today', overdue: false, today: true };
-  if (diff === 1) return { text: 'Tomorrow', overdue: false, today: false };
-  if (diff < 7) return { text: `${diff} days`, overdue: false, today: false };
-  return { text: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }), overdue: false, today: false };
+  const timeSuffix = timeStr ? ' · ' + fmtTime(timeStr) : '';
+  if (diff < 0) return { text: `${Math.abs(diff)}d overdue${timeSuffix}`, overdue: true, today: false };
+  if (diff === 0) return { text: `Today${timeSuffix}`, overdue: false, today: true };
+  if (diff === 1) return { text: `Tomorrow${timeSuffix}`, overdue: false, today: false };
+  if (diff < 7) return { text: `${diff} days${timeSuffix}`, overdue: false, today: false };
+  return { text: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + timeSuffix, overdue: false, today: false };
+}
+
+function fmtTime(t) {
+  if (!t) return '';
+  const [h, m] = t.split(':').map(Number);
+  const ampm = h >= 12 ? 'pm' : 'am';
+  const hour = h % 12 || 12;
+  return `${hour}:${m.toString().padStart(2,'0')}${ampm}`;
 }
 
 function escHtml(s) {
@@ -610,9 +627,9 @@ function submitTextTask() {
 function parseTask(transcript) {
   try {
     const parsed = parseTaskLocally(transcript);
-    openConfirmModal(transcript, parsed.name, parsed.dueDate, parsed.priority);
+    openConfirmModal(transcript, parsed.name, parsed.dueDate, parsed.priority, parsed.dueTime);
   } catch(err) {
-    openConfirmModal(transcript, transcript, null, 'medium');
+    openConfirmModal(transcript, transcript, null, 'medium', null);
   }
 }
 
@@ -666,7 +683,10 @@ function parseTaskLocally(transcript) {
     /\bin \d+ (days?|weeks?)\b/gi,
     /\b(next week|this week|by friday|end of week|end of month|day after tomorrow)\b/gi,
     /\b(asap|urgently|right away|right now)\b/gi,
-    /\btoday\b/gi, /\btomorrow\b/gi,
+    /\b(?:at|by)\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)\b/gi,
+    /\b(?:at|by)\s+noon\b/gi,
+    /\b(?:at|by)\s+midnight\b/gi,
+    /\b(?:at)\s+\d{1,2}\b/gi,
     /\bi need to\b/gi, /\bi have to\b/gi, /\bi should\b/gi, /\bremind me to\b/gi,
     /\bdon't forget to\b/gi, /\bmake sure to\b/gi, /\bplease\b/gi,
     /\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|th)?\b/gi,
@@ -676,7 +696,38 @@ function parseTaskLocally(transcript) {
   if (name) name = name.charAt(0).toUpperCase() + name.slice(1);
   if (!name) name = transcript;
 
-  return { name, dueDate: dueDate ? fmtDate(dueDate) : null, priority };
+  return { name, dueDate: dueDate ? fmtDate(dueDate) : null, dueTime: extractTime(lower), priority };
+}
+
+function extractTime(lower) {
+  // Match patterns like: 3pm, 3:30pm, 3:30 pm, at 3, at 3pm, at noon, at midnight, by 5pm
+  const timeRe = /\b(?:at|by)?\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i;
+  const noonRe = /\b(?:at\s+)?noon\b/;
+  const midnightRe = /\b(?:at\s+)?midnight\b/;
+  const bareHourRe = /\b(?:at)\s+(\d{1,2})\b(?!\s*(?:am|pm|:))/i;
+
+  if (noonRe.test(lower)) return '12:00';
+  if (midnightRe.test(lower)) return '00:00';
+
+  let m = lower.match(timeRe);
+  if (m) {
+    let h = parseInt(m[1]);
+    const min = m[2] ? parseInt(m[2]) : 0;
+    const ampm = m[3].toLowerCase();
+    if (ampm === 'pm' && h !== 12) h += 12;
+    if (ampm === 'am' && h === 12) h = 0;
+    return `${h.toString().padStart(2,'0')}:${min.toString().padStart(2,'0')}`;
+  }
+
+  m = lower.match(bareHourRe);
+  if (m) {
+    const h = parseInt(m[1]);
+    // Assume PM for hours 1-7, AM for 8-11
+    const adjusted = (h >= 1 && h <= 7) ? h + 12 : h;
+    return `${adjusted.toString().padStart(2,'0')}:00`;
+  }
+
+  return null;
 }
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
@@ -718,10 +769,11 @@ function dateFromMonthDay(monthStr, day) {
 function endOfMonth(d) { return new Date(d.getFullYear(), d.getMonth() + 1, 0); }
 
 // ─── Confirm Modal ────────────────────────────────────────────────────────────
-function openConfirmModal(transcript, name, dueDate, priority) {
+function openConfirmModal(transcript, name, dueDate, priority, dueTime) {
   document.getElementById('transcriptDisplay').textContent = `"${transcript}"`;
   document.getElementById('taskNameInput').value = name || '';
   document.getElementById('taskDateInput').value = dueDate || '';
+  document.getElementById('taskTimeInput').value = dueTime || '';
   selectPriority(priority || 'medium');
   document.getElementById('confirmModal').classList.add('open');
 }
@@ -740,6 +792,7 @@ function addTaskFromModal() {
     id: Date.now().toString(36) + Math.random().toString(36).slice(2),
     name,
     dueDate: document.getElementById('taskDateInput').value || null,
+    dueTime: document.getElementById('taskTimeInput').value || null,
     priority: selectedPriority,
     done: false,
     createdAt: new Date().toISOString()
@@ -773,8 +826,13 @@ function toggleOverdue() {
   else { saveNotifSettings(); updateNotifUI(); }
 }
 
+function toggleReminder() {
+  notifSettings.reminder = !notifSettings.reminder;
+  if (notifSettings.reminder) requestNotifPermission(() => { saveNotifSettings(); updateNotifUI(); });
+  else { saveNotifSettings(); updateNotifUI(); }
+}
+
 function saveNotifSettings() {
-  notifSettings.digestTime = document.getElementById('digestTime').value;
   localStorage.setItem('tf_notif', JSON.stringify(notifSettings));
   scheduleNotifications();
   updateNotifUI();
@@ -783,18 +841,17 @@ function saveNotifSettings() {
 function updateNotifUI() {
   document.getElementById('digestToggle').classList.toggle('on', notifSettings.digest);
   document.getElementById('overdueToggle').classList.toggle('on', notifSettings.overdue);
-  document.getElementById('digestTimeRow').style.display = notifSettings.digest ? 'block' : 'none';
-  document.getElementById('digestTime').value = notifSettings.digestTime || '08:00';
+  document.getElementById('reminderToggle').classList.toggle('on', notifSettings.reminder);
 
   const statusEl = document.getElementById('notifStatus');
-  const anyOn = notifSettings.digest || notifSettings.overdue;
+  const anyOn = notifSettings.digest || notifSettings.overdue || notifSettings.reminder;
 
   if (!anyOn) { statusEl.style.display = 'none'; return; }
 
   if (!('Notification' in window)) {
     statusEl.style.display = 'block';
     statusEl.className = 'notif-status warn';
-    statusEl.textContent = '⚠️ Notifications not supported in this browser. Add to home screen first.';
+    statusEl.textContent = '⚠️ Add to home screen to enable notifications on iPhone.';
   } else if (Notification.permission === 'granted') {
     statusEl.style.display = 'block';
     statusEl.className = 'notif-status ok';
@@ -803,16 +860,16 @@ function updateNotifUI() {
   } else if (Notification.permission === 'denied') {
     statusEl.style.display = 'block';
     statusEl.className = 'notif-status warn';
-    statusEl.textContent = '⚠️ Permission denied — enable in browser settings';
+    statusEl.textContent = '⚠️ Permission denied — enable in browser/device settings';
   } else {
     statusEl.style.display = 'block';
     statusEl.className = 'notif-status warn';
-    statusEl.textContent = 'Permission needed — tap a toggle above to prompt';
+    statusEl.textContent = 'Tap a toggle above to grant permission';
   }
 }
 
 function requestNotifPermission(cb) {
-  if (!('Notification' in window)) { showToast('Notifications not supported here'); return; }
+  if (!('Notification' in window)) { showToast('Add to home screen first'); return; }
   if (Notification.permission === 'granted') { cb(); return; }
   Notification.requestPermission().then(perm => {
     if (perm === 'granted') cb();
@@ -821,60 +878,96 @@ function requestNotifPermission(cb) {
 }
 
 function scheduleNotifications() {
-  // Clear any existing scheduled checks
   if (window._notifInterval) clearInterval(window._notifInterval);
-  if (!notifSettings.digest && !notifSettings.overdue) return;
+  const anyOn = notifSettings.digest || notifSettings.overdue || notifSettings.reminder;
+  if (!anyOn) return;
   if (!('Notification' in window) || Notification.permission !== 'granted') return;
-
   // Check every minute
   window._notifInterval = setInterval(checkNotifications, 60000);
-  checkNotifications(); // also run immediately
+  checkNotifications();
 }
 
 function checkNotifications() {
   const now = new Date();
   const today = new Date(); today.setHours(0,0,0,0);
-  const timeStr = now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0');
+  const todayKey = today.toISOString().split('T')[0];
 
-  // Morning digest
-  if (notifSettings.digest && timeStr === (notifSettings.digestTime || '08:00')) {
-    const lastDigest = localStorage.getItem('tf_last_digest');
-    const todayKey = today.toISOString().split('T')[0];
-    if (lastDigest !== todayKey) {
-      const todayTasks = tasks.filter(t => !t.done && t.dueDate === todayKey);
-      const overdueTasks = tasks.filter(t => {
-        if (t.done || !t.dueDate) return false;
-        const d = new Date(t.dueDate + 'T00:00:00');
-        return d < today;
-      });
-      let body = '';
-      if (todayTasks.length > 0) body += `${todayTasks.length} task${todayTasks.length > 1 ? 's' : ''} due today. `;
-      if (overdueTasks.length > 0) body += `${overdueTasks.length} overdue.`;
-      if (!body) body = 'No tasks due today. Clear day! ✨';
-      new Notification('Taskflow — Good morning', { body, icon: '/favicon.ico' });
-      localStorage.setItem('tf_last_digest', todayKey);
-    }
-  }
-
-  // Overdue alerts — check once per day
-  if (notifSettings.overdue) {
-    const lastOverdue = localStorage.getItem('tf_last_overdue');
-    const todayKey = today.toISOString().split('T')[0];
-    if (lastOverdue !== todayKey) {
-      const overdueTasks = tasks.filter(t => {
-        if (t.done || !t.dueDate) return false;
-        const d = new Date(t.dueDate + 'T00:00:00');
-        return d < today;
-      });
-      if (overdueTasks.length > 0) {
-        new Notification('Taskflow — Overdue tasks', {
-          body: `You have ${overdueTasks.length} overdue task${overdueTasks.length > 1 ? 's' : ''}: ${overdueTasks.slice(0,2).map(t => t.name).join(', ')}${overdueTasks.length > 2 ? '...' : ''}`,
-          icon: '/favicon.ico'
+  // ── 1. Morning digest — fires at exactly 7:00 AM ET ──
+  if (notifSettings.digest) {
+    // Convert current time to ET (UTC-5 standard, UTC-4 daylight)
+    const etOffset = getETOffsetMinutes();
+    const etNow = new Date(now.getTime() + etOffset * 60000);
+    const etH = etNow.getUTCHours();
+    const etM = etNow.getUTCMinutes();
+    if (etH === 7 && etM === 0) {
+      const lastDigest = localStorage.getItem('tf_last_digest');
+      if (lastDigest !== todayKey) {
+        const todayTasks = tasks.filter(t => !t.done && t.dueDate === todayKey);
+        const overdueTasks = tasks.filter(t => {
+          if (t.done || !t.dueDate) return false;
+          return new Date(t.dueDate + 'T00:00:00') < today;
         });
-        localStorage.setItem('tf_last_overdue', todayKey);
+        let body = '';
+        if (todayTasks.length > 0) body += `${todayTasks.length} task${todayTasks.length > 1 ? 's' : ''} due today. `;
+        if (overdueTasks.length > 0) body += `${overdueTasks.length} overdue.`;
+        if (!body) body = 'No tasks due today — clear day! ✨';
+        new Notification('Taskflow — Good morning ☀️', { body, icon: '/favicon.ico' });
+        localStorage.setItem('tf_last_digest', todayKey);
       }
     }
   }
+
+  // ── 2. Overdue alerts — fires at the exact due date+time ──
+  if (notifSettings.overdue) {
+    tasks.forEach(t => {
+      if (t.done || !t.dueDate) return;
+      const dueTime = t.dueTime || '00:00'; // default to midnight if no time set
+      const taskDt = new Date(t.dueDate + 'T' + dueTime);
+      const minsAgo = (now - taskDt) / 60000;
+      // Fire within the current minute window (0–1 min past due)
+      if (minsAgo >= 0 && minsAgo < 1) {
+        const notifKey = 'tf_overdue_' + t.id + '_' + t.dueDate;
+        if (!localStorage.getItem(notifKey)) {
+          new Notification('Taskflow — Task overdue', {
+            body: t.name + (t.dueTime ? ' · was due at ' + fmtTime(t.dueTime) : ' · was due today'),
+            icon: '/favicon.ico'
+          });
+          localStorage.setItem(notifKey, '1');
+        }
+      }
+    });
+  }
+
+  // ── 3. Reminders — fires 30 minutes before tasks with a set time ──
+  if (notifSettings.reminder) {
+    tasks.forEach(t => {
+      if (t.done || !t.dueDate || !t.dueTime) return;
+      const taskDt = new Date(t.dueDate + 'T' + t.dueTime);
+      const minsUntil = (taskDt - now) / 60000;
+      if (minsUntil >= 29 && minsUntil < 30) {
+        const notifKey = 'tf_remind_30_' + t.id + '_' + t.dueDate;
+        if (!localStorage.getItem(notifKey)) {
+          new Notification('Taskflow — Due in 30 minutes', {
+            body: t.name + ' · ' + fmtTime(t.dueTime),
+            icon: '/favicon.ico'
+          });
+          localStorage.setItem(notifKey, '1');
+        }
+      }
+    });
+  }
+}
+
+// Returns ET offset in minutes from UTC (handles DST automatically)
+function getETOffsetMinutes() {
+  // ET is UTC-5 (EST) or UTC-4 (EDT)
+  // DST in US: second Sunday March → first Sunday November
+  const now = new Date();
+  const jan = new Date(now.getFullYear(), 0, 1);
+  const jul = new Date(now.getFullYear(), 6, 1);
+  const stdOffset = Math.max(jan.getTimezoneOffset(), jul.getTimezoneOffset());
+  const isDST = now.getTimezoneOffset() < stdOffset;
+  return isDST ? -4 * 60 : -5 * 60;
 }
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
